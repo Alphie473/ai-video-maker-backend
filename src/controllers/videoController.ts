@@ -44,8 +44,9 @@ export class VideoController {
       res.status(201).json({ projectId: project.id, status: 'started' });
 
       // Run generation pipeline asynchronously
-      VideoController.executeGenerationPipeline(project.id, prompt, style, aspectRatio, voiceId, musicTrack).catch((err) => {
+      VideoController.executeGenerationPipeline(project.id, prompt, style, aspectRatio, voiceId, musicTrack).catch((err: any) => {
         console.error(`Pipeline error for project ${project.id}:`, err);
+        activeGenerationProgress[project.id] = { percent: 0, step: `Failed: ${err.message || 'Pipeline execution error'}` };
         prisma.project.update({
           where: { id: project.id },
           data: { renderStatus: 'failed' }
@@ -185,18 +186,28 @@ export class VideoController {
    * Poll generation progress for active project
    */
   static async getGenerationProgress(req: Request, res: Response) {
-    const { projectId } = req.params;
-    const progress = activeGenerationProgress[projectId] || { percent: 0, step: 'Initializing...' };
+    try {
+      const { projectId } = req.params;
+      const progress = activeGenerationProgress[projectId] || { percent: 0, step: 'Initializing...' };
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, renderStatus: true }
-    });
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true, renderStatus: true, videoUrl: true }
+      });
 
-    res.json({
-      projectId,
-      ...progress
-    });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      res.json({
+        projectId,
+        renderStatus: project.renderStatus,
+        videoUrl: project.videoUrl,
+        ...progress
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to check progress' });
+    }
   }
 
   /**
@@ -319,10 +330,17 @@ export class VideoController {
             duration: result.totalDuration
           }
         });
-      }).catch(console.error);
+      }).catch(async (err: any) => {
+        console.error(`Re-render error for project ${projectId}:`, err);
+        activeGenerationProgress[projectId] = { percent: 0, step: `Failed: ${err.message || 'Re-render failed'}` };
+        await prisma.project.update({
+          where: { id: projectId },
+          data: { renderStatus: 'failed' }
+        }).catch(console.error);
+      });
 
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: err.message || 'Failed to start re-render process' });
     }
   }
 }

@@ -35,10 +35,12 @@ export class VisualGeneratorService {
         const url = await this.generateDallE(options.imagePrompt, openaiKey);
         if (url) {
           const res = await fetch(url);
-          const arrayBuffer = await res.arrayBuffer();
-          const pngPath = filePath.replace('.bmp', '.png');
-          fs.writeFileSync(pngPath, Buffer.from(arrayBuffer));
-          return publicUrl.replace('.bmp', '.png');
+          if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            const pngPath = filePath.replace('.bmp', '.png');
+            fs.writeFileSync(pngPath, Buffer.from(arrayBuffer));
+            return publicUrl.replace('.bmp', '.png');
+          }
         }
       } catch (err) {
         console.warn('DALL-E generation failed, using procedural visual artwork:', err);
@@ -46,18 +48,15 @@ export class VisualGeneratorService {
     }
 
     // Try Pollinations.ai (Free AI image API)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
     try {
       const encodedPrompt = encodeURIComponent(`${options.imagePrompt}, ${options.style || 'cinematic'} lighting, ultra detailed 8k cinematic masterpiece`);
       const width = options.aspectRatio === '9:16' ? 720 : options.aspectRatio === '1:1' ? 800 : 1280;
       const height = options.aspectRatio === '9:16' ? 1280 : options.aspectRatio === '1:1' ? 800 : 720;
       const pollinationsUrl = `https://pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${options.sceneNumber + 42}&nologo=true`;
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
-
       const res = await fetch(pollinationsUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
       if (res.ok) {
         const arrayBuffer = await res.arrayBuffer();
         const pngPath = filePath.replace('.bmp', '.png');
@@ -66,6 +65,8 @@ export class VisualGeneratorService {
       }
     } catch (err) {
       console.log('Pollinations API fetch timed out, creating procedural visual artwork');
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     // High quality procedural 24-bit BMP raster image generator (compatible natively with FFmpeg)
@@ -74,23 +75,28 @@ export class VisualGeneratorService {
   }
 
   private static async generateDallE(prompt: string, apiKey: string): Promise<string | null> {
-    const res = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'dall-e-3',
-        prompt: prompt.slice(0, 950),
-        n: 1,
-        size: '1024x1024'
-      })
-    });
+    try {
+      const res = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'dall-e-3',
+          prompt: prompt.slice(0, 950),
+          n: 1,
+          size: '1024x1024'
+        })
+      });
 
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.data[0]?.url || null;
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.data?.[0]?.url || null;
+    } catch (err) {
+      console.warn('Error calling OpenAI DALL-E API:', err);
+      return null;
+    }
   }
 
   /**

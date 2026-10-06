@@ -30,23 +30,23 @@ export class ScriptAnalyzerService {
     requestedStyle: string = 'cinematic',
     preferredDuration?: number
   ): Promise<ScriptAnalysisResult> {
-    const openaiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
 
-    // Check if external API key is present
-    if (openaiKey && openaiKey.trim() !== '') {
-      try {
-        return await this.analyzeWithOpenAI(userPrompt, requestedStyle, openaiKey);
-      } catch (err) {
-        console.warn('OpenAI Script Analyzer failed, falling back to intelligent script engine:', err);
-      }
-    }
-
+    // Check Gemini API key first (Free AI script breakdown engine)
     if (geminiKey && geminiKey.trim() !== '') {
       try {
         return await this.analyzeWithGemini(userPrompt, requestedStyle, geminiKey);
       } catch (err) {
-        console.warn('Gemini Script Analyzer failed, falling back to intelligent script engine:', err);
+        console.warn('Gemini Script Analyzer failed, trying secondary fallback:', err);
+      }
+    }
+
+    if (openaiKey && openaiKey.trim() !== '') {
+      try {
+        return await this.analyzeWithOpenAI(userPrompt, requestedStyle, openaiKey);
+      } catch (err) {
+        console.warn('OpenAI Script Analyzer failed, trying secondary fallback:', err);
       }
     }
 
@@ -96,8 +96,8 @@ export class ScriptAnalyzerService {
     }
 
     const data = await res.json();
-    const parsed = JSON.parse(data.choices[0].message.content);
-    return parsed as ScriptAnalysisResult;
+    const rawContent = data.choices[0]?.message?.content || '';
+    return this.cleanAndParseJson<ScriptAnalysisResult>(rawContent);
   }
 
   private static async analyzeWithGemini(
@@ -139,8 +139,16 @@ export class ScriptAnalyzerService {
 
     if (!res.ok) throw new Error(`Gemini API error ${res.status}`);
     const json = await res.json();
-    const text = json.candidates[0].content.parts[0].text;
-    return JSON.parse(text) as ScriptAnalysisResult;
+    const rawContent = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return this.cleanAndParseJson<ScriptAnalysisResult>(rawContent);
+  }
+
+  private static cleanAndParseJson<T>(rawText: string): T {
+    let cleanText = rawText.trim();
+    if (cleanText.startsWith('```')) {
+      cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+    return JSON.parse(cleanText) as T;
   }
 
   /**
