@@ -156,6 +156,15 @@ export class FFmpegComposerService {
     cameraEffect: string
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let isDone = false;
+      const timeoutId = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          try { command.kill('SIGKILL'); } catch {}
+          reject(new Error('FFmpeg scene rendering process timed out'));
+        }
+      }, 15000);
+
       let command = ffmpeg().input(visualPath).loop(duration);
 
       // Ken Burns motion effect filter
@@ -186,8 +195,20 @@ export class FFmpegComposerService {
           '-y'
         ])
         .output(outputPath)
-        .on('end', () => resolve())
-        .on('error', (err) => reject(err))
+        .on('end', () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve();
+          }
+        })
+        .on('error', (err) => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            reject(err);
+          }
+        })
         .run();
     });
   }
