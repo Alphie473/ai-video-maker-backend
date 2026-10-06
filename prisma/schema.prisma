@@ -1,0 +1,75 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Project {
+  id             String   @id @default(uuid())
+  title          String
+  originalPrompt String
+  scriptText     String?
+  style          String   @default("cinematic") // cinematic, cyberpunk, anime, documentary, 3d, photorealistic
+  aspectRatio    String   @default("16:9")     // 16:9, 9:16, 1:1
+  voiceId        String   @default("adam-deep") // adam-deep, rachel-soft, alex-narrator, synth-ai
+  musicTrack     String   @default("ambient-epic") // ambient-epic, sci-fi-synth, lo-fi-chill, dramatic-tension, upbeat-synth
+  musicVolume    Float    @default(0.3)
+  captionStyle   String   @default("modern-yellow") // modern-yellow, minimalist-white, bold-box, neon-cyan
+  renderStatus   String   @default("draft") // draft, analyzing, generating, rendering, completed, failed
+  renderProgress Int      @default(0)
+  videoUrl       String?
+  thumbnailUrl   String?
+  duration       Float    @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  scenes         Scene[]
+}
+
+model Scene {
+  id            String   @id @default(uuid())
+  projectId     String
+  sceneNumber   Int
+  prompt        String
+  imagePrompt   String
+  visualUrl     String?
+  visualType    String   @default("image") // image, video
+  narrationText String
+  narrationUrl  String?
+  duration      Float    @default(4.0)
+  transition    String   @default("fade") // fade, crossfade, dissolve, wipe, slide, zoom
+  sfxTrack      String?  // rain, wind, city, footsteps, whoosh, explosions, none
+  cameraEffect  String   @default("pan-right") // pan-right, pan-left, zoom-in, zoom-out, static
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  category    String   // Sci-Fi, Fantasy, History, Commercial, Nature, Thriller
+  prompt      String
+  style       String
+  thumbnailUrl String
+  duration    String
+  sceneCount  Int
+  createdAt   DateTime @default(now())
+}
+
+model Settings {
+  id                    String   @id @default("default")
+  openaiApiKey          String?
+  geminiApiKey          String?
+  elevenlabsApiKey      String?
+  replicateApiKey       String?
+  falApiKey             String?
+  defaultResolution     String   @default("1080p") // 720p, 1080p, 4k
+  defaultFps            Int      @default(30)
+  enableAiMockFallback  Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+}

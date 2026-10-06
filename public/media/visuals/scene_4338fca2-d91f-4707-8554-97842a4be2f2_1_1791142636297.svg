@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0b0c10" />
+      <stop offset="45%" stop-color="#1f2833" />
+      <stop offset="85%" stop-color="#c5a059" />
+      <stop offset="100%" stop-color="#07090e" />
+    </linearGradient>
+
+    <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff9ee" stop-opacity="1" />
+      <stop offset="40%" stop-color="#ff7832" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#ff7832" stop-opacity="0" />
+    </radialGradient>
+
+    <linearGradient id="vignette" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#000" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#000" stop-opacity="0.6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Sky Background -->
+  <rect width="100%" height="100%" fill="url(#skyGrad)" />
+
+  <!-- Stars -->
+  <circle cx="959" cy="411" r="0.8" fill="#ffffff" opacity="0.3" /><circle cx="978" cy="2" r="1.6" fill="#ffffff" opacity="0.4" /><circle cx="997" cy="25" r="2.4000000000000004" fill="#ffffff" opacity="0.5" /><circle cx="1016" cy="48" r="0.8" fill="#ffffff" opacity="0.6" /><circle cx="1035" cy="71" r="1.6" fill="#ffffff" opacity="0.7" /><circle cx="1054" cy="94" r="2.4000000000000004" fill="#ffffff" opacity="0.3" /><circle cx="1073" cy="117" r="0.8" fill="#ffffff" opacity="0.4" /><circle cx="1092" cy="140" r="1.6" fill="#ffffff" opacity="0.5" /><circle cx="1111" cy="163" r="2.4000000000000004" fill="#ffffff" opacity="0.6" /><circle cx="1130" cy="186" r="0.8" fill="#ffffff" opacity="0.7" /><circle cx="1149" cy="209" r="1.6" fill="#ffffff" opacity="0.3" /><circle cx="1168" cy="232" r="2.4000000000000004" fill="#ffffff" opacity="0.4" /><circle cx="1187" cy="255" r="0.8" fill="#ffffff" opacity="0.5" /><circle cx="1206" cy="278" r="1.6" fill="#ffffff" opacity="0.6" /><circle cx="1225" cy="301" r="2.4000000000000004" fill="#ffffff" opacity="0.7" /><circle cx="1244" cy="324" r="0.8" fill="#ffffff" opacity="0.3" /><circle cx="1263" cy="347" r="1.6" fill="#ffffff" opacity="0.4" /><circle cx="2" cy="370" r="2.4000000000000004" fill="#ffffff" opacity="0.5" /><circle cx="21" cy="393" r="0.8" fill="#ffffff" opacity="0.6" /><circle cx="40" cy="416" r="1.6" fill="#ffffff" opacity="0.7" /><circle cx="59" cy="7" r="2.4000000000000004" fill="#ffffff" opacity="0.3" /><circle cx="78" cy="30" r="0.8" fill="#ffffff" opacity="0.4" /><circle cx="97" cy="53" r="1.6" fill="#ffffff" opacity="0.5" /><circle cx="116" cy="76" r="2.4000000000000004" fill="#ffffff" opacity="0.6" /><circle cx="135" cy="99" r="0.8" fill="#ffffff" opacity="0.7" /><circle cx="154" cy="122" r="1.6" fill="#ffffff" opacity="0.3" /><circle cx="173" cy="145" r="2.4000000000000004" fill="#ffffff" opacity="0.4" /><circle cx="192" cy="168" r="0.8" fill="#ffffff" opacity="0.5" /><circle cx="211" cy="191" r="1.6" fill="#ffffff" opacity="0.6" /><circle cx="230" cy="214" r="2.4000000000000004" fill="#ffffff" opacity="0.7" /><circle cx="249" cy="237" r="0.8" fill="#ffffff" opacity="0.3" /><circle cx="268" cy="260" r="1.6" fill="#ffffff" opacity="0.4" /><circle cx="287" cy="283" r="2.4000000000000004" fill="#ffffff" opacity="0.5" /><circle cx="306" cy="306" r="0.8" fill="#ffffff" opacity="0.6" /><circle cx="325" cy="329" r="1.6" fill="#ffffff" opacity="0.7" /><circle cx="344" cy="352" r="2.4000000000000004" fill="#ffffff" opacity="0.3" /><circle cx="363" cy="375" r="0.8" fill="#ffffff" opacity="0.4" /><circle cx="382" cy="398" r="1.6" fill="#ffffff" opacity="0.5" /><circle cx="401" cy="421" r="2.4000000000000004" fill="#ffffff" opacity="0.6" /><circle cx="420" cy="12" r="0.8" fill="#ffffff" opacity="0.7" /><circle cx="439" cy="35" r="1.6" fill="#ffffff" opacity="0.3" /><circle cx="458" cy="58" r="2.4000000000000004" fill="#ffffff" opacity="0.4" /><circle cx="477" cy="81" r="0.8" fill="#ffffff" opacity="0.5" /><circle cx="496" cy="104" r="1.6" fill="#ffffff" opacity="0.6" /><circle cx="515" cy="127" r="2.4000000000000004" fill="#ffffff" opacity="0.7" /><circle cx="534" cy="150" r="0.8" fill="#ffffff" opacity="0.3" /><circle cx="553" cy="173" r="1.6" fill="#ffffff" opacity="0.4" /><circle cx="572" cy="196" r="2.4000000000000004" fill="#ffffff" opacity="0.5" /><circle cx="591" cy="219" r="0.8" fill="#ffffff" opacity="0.6" /><circle cx="610" cy="242" r="1.6" fill="#ffffff" opacity="0.7" /><circle cx="629" cy="265" r="2.4000000000000004" fill="#ffffff" opacity="0.3" /><circle cx="648" cy="288" r="0.8" fill="#ffffff" opacity="0.4" /><circle cx="667" cy="311" r="1.6" fill="#ffffff" opacity="0.5" /><circle cx="686" cy="334" r="2.4000000000000004" fill="#ffffff" opacity="0.6" /><circle cx="705" cy="357" r="0.8" fill="#ffffff" opacity="0.7" /><circle cx="724" cy="380" r="1.6" fill="#ffffff" opacity="0.3" /><circle cx="743" cy="403" r="2.4000000000000004" fill="#ffffff" opacity="0.4" /><circle cx="762" cy="426" r="0.8" fill="#ffffff" opacity="0.5" /><circle cx="781" cy="17" r="1.6" fill="#ffffff" opacity="0.6" /><circle cx="800" cy="40" r="2.4000000000000004" fill="#ffffff" opacity="0.7" />
+
+  <!-- Glowing Sun / Core -->
+  <circle cx="576" cy="251.99999999999997" r="180" fill="url(#sunGlow)" />
+  <circle cx="576" cy="251.99999999999997" r="57.6" fill="#fff9ee" />
+
+  <!-- Mountain Silhouette Layer 1 -->
+  <path d="M0,720 L0,396.00000000000006 Q320,302.4 640,374.40000000000003 T1280,345.59999999999997 L1280,720 Z" fill="rgba(15, 20, 35, 0.7)" />
+
+  <!-- Mountain Silhouette Layer 2 -->
+  <path d="M0,720 L0,468 Q448,396.00000000000006 896,489.6 T1280,432 L1280,720 Z" fill="#0b0e17" />
+
+  <!-- Hero Platform & Silhouette -->
+  <ellipse cx="640" cy="633.6" rx="320" ry="36" fill="#040508" />
+  
+  <!-- Hero Figure -->
+  <circle cx="640" cy="547.2" r="10" fill="#040508" />
+  <rect x="632" y="554.4" width="16" height="36" rx="4" fill="#040508" />
+  <rect x="629" y="597.6" width="9" height="28" fill="#040508" />
+  <rect x="642" y="597.6" width="9" height="28" fill="#040508" />
+
+  <!-- Vignette -->
+  <rect width="100%" height="100%" fill="url(#vignette)" style="mix-blend-mode: multiply;" />
+
+  <!-- Title Badge -->
+  <rect x="25" y="25" width="120" height="32" rx="8" fill="rgba(0,0,0,0.6)" />
+  <text x="37" y="46" font-family="sans-serif" font-size="14" font-weight="bold" fill="#06b6d4">SCENE #1</text>
+</svg>
