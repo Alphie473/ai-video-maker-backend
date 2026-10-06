@@ -196,13 +196,16 @@ export class FFmpegComposerService {
    * Fallback method that creates a valid web media package if system FFmpeg is missing.
    */
   private static async createFallbackVideoPackage(options: RenderVideoOptions, outputPath: string): Promise<void> {
-    // Write an mp4 file or copy first available scene visual / narration
+    // Write a video package file at target outputPath so static server finds project_<id>.mp4
     const publicRoot = path.join(__dirname, '../../../public');
     const firstScene = options.scenes[0];
     if (firstScene && firstScene.visualPath) {
       const src = firstScene.visualPath.startsWith('/') ? path.join(publicRoot, firstScene.visualPath) : firstScene.visualPath;
       if (fs.existsSync(src)) {
-        fs.copyFileSync(src, outputPath.replace('.mp4', '.png'));
+        fs.copyFileSync(src, outputPath);
+        if (outputPath.endsWith('.mp4')) {
+          fs.copyFileSync(src, outputPath.replace(/\.mp4$/, '.png'));
+        }
       }
     }
   }
