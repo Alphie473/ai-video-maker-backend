@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { FFmpegComposerService } from '../video/ffmpegComposer';
 
 export interface NarrationOptions {
   narrationText: string;
@@ -19,7 +20,7 @@ export class NarrationService {
   }
 
   /**
-   * Generates TTS audio narration file for a scene.
+   * Generates TTS audio narration file for a scene and calculates dynamic duration.
    */
   static async generateNarration(options: NarrationOptions): Promise<{ audioUrl: string; duration: number }> {
     const storageDir = this.getStorageDir();
@@ -33,13 +34,41 @@ export class NarrationService {
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
 
+    // Helper to calculate dynamic duration from audio file
+    const resolveFinalNarration = async (targetFilePath: string, targetPublicUrl: string): Promise<{ audioUrl: string; duration: number }> => {
+      let measuredDuration: number | null = null;
+      try {
+        measuredDuration = await FFmpegComposerService.getMediaDuration(targetFilePath);
+      } catch (err) {
+        console.warn('ffprobe audio duration measurement notice:', err);
+      }
+
+      if (!measuredDuration || measuredDuration <= 0) {
+        measuredDuration = NarrationService.estimateAudioDuration(targetFilePath, options.narrationText, options.desiredDuration);
+      }
+
+      // Dynamic duration: actual speech audio length + comfortable natural breathing pause (0.8s),
+      // ensuring natural pacing without cutting off speech during transitions.
+      const naturalDuration = Math.round((measuredDuration + 0.8) * 10) / 10;
+      
+      // If user explicitly defined a longer scene duration, honor that duration.
+      const finalDuration = options.desiredDuration && options.desiredDuration > naturalDuration
+        ? Math.round(options.desiredDuration * 10) / 10
+        : naturalDuration;
+
+      return {
+        audioUrl: targetPublicUrl,
+        duration: Math.max(3.5, finalDuration)
+      };
+    };
+
     // 1. Try Edge-TTS (Free Microsoft Edge TTS service)
     if (ttsProvider === 'edge-tts') {
       try {
         const audioBuffer = await this.generateEdgeTts(options.narrationText, options.voiceId);
         if (audioBuffer && audioBuffer.length > 0) {
           fs.writeFileSync(filePath, audioBuffer);
-          return { audioUrl: publicUrl, duration: options.desiredDuration };
+          return await resolveFinalNarration(filePath, publicUrl);
         }
       } catch (err) {
         console.warn('Edge TTS failed, falling back to secondary providers:', err);
@@ -53,7 +82,7 @@ export class NarrationService {
         if (audioBuffer) {
           const wavPath = filePath.endsWith('.mp3') ? filePath.replace(/\.mp3$/, '.wav') : filePath;
           fs.writeFileSync(wavPath, audioBuffer);
-          return { audioUrl: publicUrl.replace(/\.mp3$/, '.wav'), duration: options.desiredDuration };
+          return await resolveFinalNarration(wavPath, publicUrl.replace(/\.mp3$/, '.wav'));
         }
       } catch (err) {
         console.warn('ElevenLabs TTS failed, attempting fallback:', err);
@@ -67,7 +96,7 @@ export class NarrationService {
         if (audioBuffer) {
           const mp3Path = filePath.endsWith('.wav') ? filePath.replace(/\.wav$/, '.mp3') : filePath;
           fs.writeFileSync(mp3Path, audioBuffer);
-          return { audioUrl: publicUrl.replace(/\.wav$/, '.mp3'), duration: options.desiredDuration };
+          return await resolveFinalNarration(mp3Path, publicUrl.replace(/\.wav$/, '.mp3'));
         }
       } catch (err) {
         console.warn('OpenAI TTS failed, attempting fallback:', err);
@@ -81,7 +110,7 @@ export class NarrationService {
         if (audioBuffer && audioBuffer.length > 0) {
           const mp3Path = filePath.endsWith('.wav') ? filePath.replace(/\.wav$/, '.mp3') : filePath;
           fs.writeFileSync(mp3Path, audioBuffer);
-          return { audioUrl: publicUrl.replace(/\.wav$/, '.mp3'), duration: options.desiredDuration };
+          return await resolveFinalNarration(mp3Path, publicUrl.replace(/\.wav$/, '.mp3'));
         }
       } catch (err) {
         console.warn('Edge TTS fallback failed:', err);
@@ -91,7 +120,37 @@ export class NarrationService {
     // 5. High quality procedural audio wave generator fallback
     const fallbackPath = filePath.endsWith('.mp3') ? filePath.replace(/\.mp3$/, '.wav') : filePath;
     await this.generateProceduralWavAudio(fallbackPath, options.narrationText, options.voiceId, options.desiredDuration);
-    return { audioUrl: publicUrl.replace(/\.mp3$/, '.wav'), duration: options.desiredDuration };
+    return await resolveFinalNarration(fallbackPath, publicUrl.replace(/\.mp3$/, '.wav'));
+  }
+
+  private static estimateAudioDuration(filePath: string, text: string, fallbackDuration?: number): number {
+    try {
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        if (filePath.endsWith('.wav')) {
+          const buf = Buffer.alloc(44);
+          const fd = fs.openSync(filePath, 'r');
+          fs.readSync(fd, buf, 0, 44, 0);
+          fs.closeSync(fd);
+          const byteRate = buf.readUInt32LE(28);
+          const dataSize = buf.readUInt32LE(40);
+          if (byteRate > 0 && dataSize > 0) {
+            return dataSize / byteRate;
+          }
+        } else if (filePath.endsWith('.mp3')) {
+          // Edge-TTS AUDIO_24KHZ_48KBITRATE_MONO_MP3 is ~6000 bytes/sec
+          return Math.max(3.0, stats.size / 6000);
+        }
+      }
+    } catch {}
+
+    // Estimate based on speech word count: ~2.3 words per second + pause
+    if (text && text.trim().length > 0) {
+      const words = text.trim().split(/\s+/).length;
+      return Math.max(3.0, Math.round((words / 2.3) * 10) / 10);
+    }
+
+    return fallbackDuration && fallbackDuration > 0 ? fallbackDuration : 5.0;
   }
 
   private static async generateEdgeTts(text: string, voiceId: string = 'adam-deep'): Promise<Buffer | null> {

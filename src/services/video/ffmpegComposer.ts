@@ -16,10 +16,23 @@ try {
   console.log('@ffmpeg-installer not found, checking system or ffmpeg-static');
 }
 
+let ffprobePath: string | null = null;
+try {
+  const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
+  if (ffprobeInstaller && ffprobeInstaller.path) {
+    ffprobePath = ffprobeInstaller.path;
+    if (ffprobePath) {
+      ffmpeg.setFfprobePath(ffprobePath);
+    }
+  }
+} catch (e) {
+  console.log('@ffprobe-installer not found');
+}
+
 export interface ComposeSceneInput {
   sceneNumber: number;
   visualPath: string; // Absolute path to image or video
-  narrationPath?: string; // Absolute path to narration WAV
+  narrationPath?: string; // Absolute path to narration WAV or MP3
   sfxPath?: string;
   duration: number;
   narrationText: string;
@@ -44,6 +57,20 @@ export class FFmpegComposerService {
       fs.mkdirSync(dir, { recursive: true });
     }
     return dir;
+  }
+
+  /**
+   * Probes the exact duration of a media file in seconds.
+   */
+  static async getMediaDuration(mediaPath: string): Promise<number | null> {
+    return new Promise((resolve) => {
+      ffmpeg.ffprobe(mediaPath, (err, metadata) => {
+        if (!err && metadata && metadata.format && typeof metadata.format.duration === 'number' && metadata.format.duration > 0) {
+          return resolve(metadata.format.duration);
+        }
+        resolve(null);
+      });
+    });
   }
 
   /**
@@ -93,7 +120,7 @@ export class FFmpegComposerService {
       for (let i = 0; i < numScenes; i++) {
         const scene = options.scenes[i];
         const percent = Math.floor(20 + (i / numScenes) * 50);
-        if (onProgress) onProgress(percent, `Rendering Scene ${scene.sceneNumber} (${scene.cameraEffect})...`);
+        if (onProgress) onProgress(percent, `Rendering Scene ${scene.sceneNumber} (${scene.cameraEffect}, ${Math.round(scene.duration)}s)...`);
 
         const sceneClipPath = path.join(this.getVideosDir(), `temp_scene_${options.projectId}_${i}.mp4`);
         const absVisual = scene.visualPath.startsWith('/') ? path.join(publicRoot, scene.visualPath) : scene.visualPath;
@@ -129,12 +156,25 @@ export class FFmpegComposerService {
         }
 
         const concatInputs = tempSceneClips.map((_, idx) => `[${idx}:v][${idx}:a]`).join('');
-        const filterGraph = `${concatInputs}concat=n=${tempSceneClips.length}:v=1:a=1[outv][outa]`;
+        let filterGraph: string;
+
+        if (hasMusic) {
+          const musicIdx = tempSceneClips.length;
+          const vol = typeof options.musicVolume === 'number' ? options.musicVolume : 0.2;
+          filterGraph = `${concatInputs}concat=n=${tempSceneClips.length}:v=1:a=1[vconcat][aconcat];[${musicIdx}:a]aloop=loop=-1:size=2e+09,volume=${vol}[bgm];[aconcat][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]`;
+          command
+            .complexFilter([filterGraph])
+            .map('[vconcat]')
+            .map('[outa]');
+        } else {
+          filterGraph = `${concatInputs}concat=n=${tempSceneClips.length}:v=1:a=1[outv][outa]`;
+          command
+            .complexFilter([filterGraph])
+            .map('[outv]')
+            .map('[outa]');
+        }
 
         command
-          .complexFilter([filterGraph])
-          .map('[outv]')
-          .map('[outa]')
           .outputOptions(['-c:v libx264', '-preset ultrafast', '-r 24', '-pix_fmt yuv420p', '-c:a aac', '-b:a 192k', '-y'])
           .output(outputPath)
           .on('progress', (p) => {
@@ -183,8 +223,8 @@ export class FFmpegComposerService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let isDone = false;
-      // Dynamic scene timeout: at least 60s per scene, up to 120s for long clips (adequate for Render free tier CPU)
-      const timeoutMs = Math.max(60000, Math.ceil(duration * 10000));
+      // Dynamic scene timeout: at least 60s per scene, up to 180s for long clips
+      const timeoutMs = Math.max(60000, Math.ceil(duration * 12000));
       let command: any = null;
 
       const timeoutId = setTimeout(() => {
@@ -200,7 +240,7 @@ export class FFmpegComposerService {
       command = ffmpeg().input(visualPath).loop(duration);
 
       const frameCount = Math.ceil(duration * 24);
-      // Ken Burns motion effect filter tuned for 24fps
+      // Ken Burns motion effect filter tuned for 24fps with dynamic frame duration
       let zoomFilter = `zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=1280x720`;
       if (cameraEffect === 'pan-right') {
         zoomFilter = `zoompan=z='1.1':x='if(lte(on,1),(iw-iw/zoom),max(iw/zoom,x-1))':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=1280x720`;
@@ -225,7 +265,8 @@ export class FFmpegComposerService {
           '-pix_fmt yuv420p',
           '-t', `${duration}`,
           '-c:a aac',
-          '-shortest',
+          '-b:a 192k',
+          '-af', 'apad',
           '-y'
         ])
         .output(outputPath)

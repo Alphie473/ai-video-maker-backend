@@ -8,6 +8,7 @@ export interface VisualGenerationOptions {
   aspectRatio?: string; // 16:9, 9:16, 1:1
   sceneNumber: number;
   projectId: string;
+  topic?: string;
 }
 
 export class VisualGeneratorService {
@@ -30,9 +31,14 @@ export class VisualGeneratorService {
 
     const openaiKey = process.env.OPENAI_API_KEY;
 
+    // Ensure user topic is strictly included in the final image prompt
+    const effectivePrompt = options.topic && !options.imagePrompt.toLowerCase().includes(options.topic.toLowerCase())
+      ? `${options.topic}, ${options.imagePrompt}`
+      : options.imagePrompt;
+
     if (openaiKey && openaiKey.trim() !== '') {
       try {
-        const url = await this.generateDallE(options.imagePrompt, openaiKey);
+        const url = await this.generateDallE(effectivePrompt, openaiKey);
         if (url) {
           const res = await fetch(url);
           if (res.ok) {
@@ -51,7 +57,7 @@ export class VisualGeneratorService {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
     try {
-      const encodedPrompt = encodeURIComponent(`${options.imagePrompt}, ${options.style || 'cinematic'} lighting, ultra detailed 8k cinematic masterpiece`);
+      const encodedPrompt = encodeURIComponent(`${effectivePrompt}, ${options.style || 'cinematic'} lighting, ultra detailed 8k cinematic masterpiece`);
       const width = options.aspectRatio === '9:16' ? 720 : options.aspectRatio === '1:1' ? 800 : 1280;
       const height = options.aspectRatio === '9:16' ? 1280 : options.aspectRatio === '1:1' ? 800 : 720;
       const pollinationsUrl = `https://pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${options.sceneNumber + 42}&nologo=true`;
@@ -137,16 +143,38 @@ export class VisualGeneratorService {
     buffer.writeUInt32LE(0, 46); // Colors in palette
     buffer.writeUInt32LE(0, 50); // Important colors
 
-    // Theme color palette selection
-    let rTop = 11, gTop = 12, bTop = 16;
-    let rMid = 31, gMid = 40, bMid = 51;
-    let rBot = 197, gBot = 160, bBot = 89;
+    // Theme color palette selection tailored to actual scene topic & prompt
+    const textContext = `${options.topic || ''} ${options.prompt} ${options.imagePrompt}`.toLowerCase();
+    let rTop = 20, gTop = 15, bTop = 10;
+    let rMid = 80, gMid = 55, bMid = 30;
+    let rBot = 220, gBot = 165, bBot = 75; // Default warm golden cinematic atmosphere
 
-    if (style.includes('cyberpunk') || seed % 3 === 0) {
+    if (textContext.match(/pyramid|egypt|desert|ancient|pharaoh|tomb|dune|sand/)) {
+      // Ancient Egypt: warm golden sands, terracotta & amber
+      rTop = 28; gTop = 16; bTop = 8;
+      rMid = 145; gMid = 85; bMid = 35;
+      rBot = 245; gBot = 185; bBot = 75;
+    } else if (textContext.match(/nature|forest|jungle|tree|mountain|river|green|meadow/)) {
+      // Nature: deep forest emerald & golden canopy
+      rTop = 8; gTop = 28; bTop = 18;
+      rMid = 24; gMid = 78; bMid = 45;
+      rBot = 110; gBot = 195; bBot = 90;
+    } else if (textContext.match(/ocean|sea|underwater|water|beach|marine|aquatic/)) {
+      // Ocean: deep navy azure & cyan radiance
+      rTop = 5; gTop = 15; bTop = 35;
+      rMid = 12; gMid = 65; bMid = 115;
+      rBot = 45; gBot = 180; bBot = 215;
+    } else if (textContext.match(/space|galaxy|cosmos|star|nebula|astronomy|planet/)) {
+      // Deep Space: cosmic void & nebula violet
+      rTop = 6; gTop = 4; bTop = 18;
+      rMid = 35; gMid = 15; bMid = 65;
+      rBot = 120; gBot = 140; bBot = 230;
+    } else if (style.includes('cyberpunk') || textContext.match(/cyberpunk|neon|synth|futuristic/)) {
+      // Cyberpunk: neon magenta & cyan
       rTop = 10; gTop = 5; bTop = 27;
       rMid = 42; gMid = 14; bMid = 78;
       rBot = 6; gBot = 182; bBot = 212;
-    } else if (style.includes('anime') || seed % 3 === 1) {
+    } else if (style.includes('anime')) {
       rTop = 13; gTop = 37; bTop = 63;
       rMid = 30; gMid = 95; bMid = 116;
       rBot = 243; gBot = 148; bBot = 34;

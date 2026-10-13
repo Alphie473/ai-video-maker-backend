@@ -17,11 +17,22 @@ export class VideoController {
    */
   static async createVideoFromPrompt(req: Request, res: Response) {
     try {
-      const { prompt, scriptText, style = 'cinematic', aspectRatio = '16:9', voiceId = 'adam-deep', musicTrack = 'ambient-epic' } = req.body;
+      const {
+        prompt,
+        scriptText,
+        style = 'cinematic',
+        aspectRatio = '16:9',
+        voiceId = 'adam-deep',
+        musicTrack = 'ambient-epic',
+        duration,
+        preferredDuration
+      } = req.body;
 
       if (!prompt || prompt.trim() === '') {
         return res.status(400).json({ error: 'Prompt or video description is required.' });
       }
+
+      const targetDuration = typeof preferredDuration === 'number' ? preferredDuration : typeof duration === 'number' ? duration : undefined;
 
       // Step 1: Create Initial Draft Project in DB
       const project = await prisma.project.create({
@@ -43,8 +54,8 @@ export class VideoController {
       // Return project ID immediately so client can poll or show progress screen
       res.status(201).json({ projectId: project.id, status: 'started' });
 
-      // Run generation pipeline asynchronously
-      VideoController.executeGenerationPipeline(project.id, prompt, style, aspectRatio, voiceId, musicTrack).catch((err: any) => {
+      // Run generation pipeline asynchronously with target duration
+      VideoController.executeGenerationPipeline(project.id, prompt, style, aspectRatio, voiceId, musicTrack, targetDuration).catch((err: any) => {
         console.error(`Pipeline error for project ${project.id}:`, err);
         activeGenerationProgress[project.id] = { percent: 0, step: `Failed: ${err.message || 'Pipeline execution error'}` };
         prisma.project.update({
@@ -67,11 +78,12 @@ export class VideoController {
     style: string,
     aspectRatio: string,
     voiceId: string,
-    musicTrack: string
+    musicTrack: string,
+    preferredDuration?: number
   ) {
-    // 1. Script Analysis
+    // 1. Script Analysis with topic extraction and target duration
     activeGenerationProgress[projectId] = { percent: 15, step: 'Analyzing script & creating story breakdown...' };
-    const scriptResult = await ScriptAnalyzerService.analyzeScript(prompt, style);
+    const scriptResult = await ScriptAnalyzerService.analyzeScript(prompt, style, preferredDuration);
 
     await prisma.project.update({
       where: { id: projectId },
@@ -87,8 +99,6 @@ export class VideoController {
     const scenesToCreate = scriptResult.scenes;
     const sceneRecords = [];
 
-    const musicUrl = await MusicSfxService.getMusicTrackUrl(musicTrack, 30);
-
     for (let i = 0; i < scenesToCreate.length; i++) {
       const rawScene = scenesToCreate[i];
       const progressPercent = Math.floor(35 + (i / scenesToCreate.length) * 35);
@@ -97,32 +107,33 @@ export class VideoController {
         step: `Generating Scene ${rawScene.sceneNumber} visual artwork & TTS narration...`
       };
 
-      // Visual artwork
+      // Visual artwork strictly passing down project topic and image prompt
       const visualUrl = await VisualGeneratorService.generateVisual({
         prompt: rawScene.prompt,
         imagePrompt: rawScene.imagePrompt,
         style,
         aspectRatio,
         sceneNumber: rawScene.sceneNumber,
-        projectId
+        projectId,
+        topic: scriptResult.title || prompt
       });
 
-      // Narration audio
+      // Narration audio: generate audio and dynamically calculate actual duration
       const narrationResult = await NarrationService.generateNarration({
         narrationText: rawScene.narrationText,
-        voiceId,
+        voiceId: scriptResult.suggestedVoiceId || voiceId,
         sceneNumber: rawScene.sceneNumber,
         projectId,
         desiredDuration: rawScene.duration
       });
 
-      // SFX track
+      // SFX track using dynamic scene duration
       let sfxUrl = null;
       if (rawScene.sfxTrack && rawScene.sfxTrack !== 'none') {
-        sfxUrl = await MusicSfxService.getSfxUrl(rawScene.sfxTrack, rawScene.duration);
+        sfxUrl = await MusicSfxService.getSfxUrl(rawScene.sfxTrack, narrationResult.duration);
       }
 
-      // Save Scene to DB
+      // Save Scene to DB with the dynamically calculated duration
       const sceneRecord = await prisma.scene.create({
         data: {
           projectId,
@@ -146,6 +157,10 @@ export class VideoController {
     // 3. FFmpeg Composition & Final Rendering
     activeGenerationProgress[projectId] = { percent: 75, step: 'Stitching video scenes, transitions & mixing music track...' };
 
+    // Total duration scaled dynamically based on sum of scene narration durations
+    const totalDuration = sceneRecords.reduce((acc, s) => acc + s.duration, 0);
+    const musicUrl = await MusicSfxService.getMusicTrackUrl(scriptResult.suggestedMusicTrack || musicTrack, totalDuration);
+
     const composeScenes: ComposeSceneInput[] = sceneRecords.map(s => ({
       sceneNumber: s.sceneNumber,
       visualPath: s.visualUrl!,
@@ -161,13 +176,14 @@ export class VideoController {
       title: scriptResult.title,
       scenes: composeScenes,
       musicPath: musicUrl,
+      musicVolume: 0.25,
       captionStyle: 'modern-yellow',
       aspectRatio
     }, (percent, stepName) => {
       activeGenerationProgress[projectId] = { percent, step: stepName };
     });
 
-    // 4. Update Project Complete Status
+    // 4. Update Project Complete Status with actual rendered duration
     await prisma.project.update({
       where: { id: projectId },
       data: {
@@ -179,7 +195,7 @@ export class VideoController {
       }
     });
 
-    activeGenerationProgress[projectId] = { percent: 100, step: 'Finalizing your video render...' };
+    activeGenerationProgress[projectId] = { percent: 100, step: 'Finalizing your video render!' };
   }
 
   /**
@@ -230,14 +246,16 @@ export class VideoController {
       const updatedPrompt = prompt || scene.prompt;
       const updatedImagePrompt = imagePrompt || scene.imagePrompt || updatedPrompt;
 
-      // Re-generate visual
+      // Re-generate visual strictly passing down the project topic
+      const topic = scene.project.title || scene.project.originalPrompt;
       const visualUrl = await VisualGeneratorService.generateVisual({
         prompt: updatedPrompt,
         imagePrompt: updatedImagePrompt,
         style: scene.project.style,
         aspectRatio: scene.project.aspectRatio,
         sceneNumber: scene.sceneNumber,
-        projectId: scene.projectId
+        projectId: scene.projectId,
+        topic
       });
 
       const updatedScene = await prisma.scene.update({
@@ -297,7 +315,7 @@ export class VideoController {
 
       res.json({ message: 'Re-render started', projectId });
 
-      // Run async render
+      // Run async render with dynamic durations
       const composeScenes: ComposeSceneInput[] = project.scenes.map(s => ({
         sceneNumber: s.sceneNumber,
         visualPath: s.visualUrl!,
@@ -308,7 +326,8 @@ export class VideoController {
         cameraEffect: s.cameraEffect
       }));
 
-      const musicUrl = await MusicSfxService.getMusicTrackUrl(project.musicTrack, project.duration);
+      const totalDuration = project.scenes.reduce((acc, s) => acc + s.duration, 0);
+      const musicUrl = await MusicSfxService.getMusicTrackUrl(project.musicTrack, totalDuration);
 
       FFmpegComposerService.renderFullVideo({
         projectId,

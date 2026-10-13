@@ -87,7 +87,7 @@ export class ProjectController {
   static async addSceneToProject(req: Request, res: Response) {
     try {
       const { projectId } = req.params;
-      const { prompt, narrationText, transition, cameraEffect } = req.body;
+      const { prompt, narrationText, transition, cameraEffect, duration } = req.body;
 
       const project = await prisma.project.findUnique({
         where: { id: projectId },
@@ -97,18 +97,18 @@ export class ProjectController {
       if (!project) return res.status(404).json({ error: 'Project not found' });
 
       const newSceneNumber = project.scenes.length + 1;
-      const defaultPrompt = prompt || `Scene ${newSceneNumber}: Cinematic visual moment`;
-      const defaultNarration = narrationText || `And so the story continues into new horizons.`;
+      const defaultPrompt = prompt || `Scene ${newSceneNumber}: ${project.title || 'Cinematic visual moment'}`;
+      const defaultNarration = narrationText || `And so the story of ${project.title || 'our journey'} continues into new horizons.`;
 
       const scene = await prisma.scene.create({
         data: {
           projectId,
           sceneNumber: newSceneNumber,
           prompt: defaultPrompt,
-          imagePrompt: `${defaultPrompt}, 8k cinematic lighting`,
+          imagePrompt: `${project.title || ''}, ${defaultPrompt}, ${project.style || 'cinematic'} lighting, 8k`,
           visualUrl: `/media/visuals/scene_placeholder.png`,
           narrationText: defaultNarration,
-          duration: 4.5,
+          duration: typeof duration === 'number' && duration > 0 ? duration : 5.0,
           transition: transition || 'fade',
           cameraEffect: cameraEffect || 'pan-right'
         }
