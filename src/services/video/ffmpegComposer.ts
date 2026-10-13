@@ -126,7 +126,7 @@ export class FFmpegComposerService {
         const absVisual = scene.visualPath.startsWith('/') ? path.join(publicRoot, scene.visualPath) : scene.visualPath;
         const absAudio = scene.narrationPath ? (scene.narrationPath.startsWith('/') ? path.join(publicRoot, scene.narrationPath) : scene.narrationPath) : null;
 
-        await this.renderSingleSceneFFmpeg(absVisual, absAudio, sceneClipPath, scene.duration, scene.cameraEffect);
+        await this.renderSingleSceneFFmpeg(absVisual, absAudio, sceneClipPath, scene.duration, scene.cameraEffect, options.aspectRatio);
         tempSceneClips.push(sceneClipPath);
       }
 
@@ -219,7 +219,8 @@ export class FFmpegComposerService {
     audioPath: string | null,
     outputPath: string,
     duration: number,
-    cameraEffect: string
+    cameraEffect: string,
+    aspectRatio?: string
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let isDone = false;
@@ -237,15 +238,43 @@ export class FFmpegComposerService {
         }
       }, timeoutMs);
 
-      command = ffmpeg().input(visualPath).loop(duration);
+      // Determine dimensions based on requested aspect ratio
+      const ar = (aspectRatio || '16:9').toLowerCase();
+      let width = 1280;
+      let height = 720;
+      if (ar === '9:16') {
+        width = 720;
+        height = 1280;
+      } else if (ar === '1:1') {
+        width = 720;
+        height = 720;
+      }
 
       const frameCount = Math.ceil(duration * 24);
-      // Ken Burns motion effect filter tuned for 24fps with dynamic frame duration
-      let zoomFilter = `zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=1280x720`;
-      if (cameraEffect === 'pan-right') {
-        zoomFilter = `zoompan=z='1.1':x='if(lte(on,1),(iw-iw/zoom),max(iw/zoom,x-1))':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=1280x720`;
-      } else if (cameraEffect === 'pan-left') {
-        zoomFilter = `zoompan=z='1.1':x='x+1':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=1280x720`;
+      const isVideo = /\.(mp4|webm|mov|mkv)$/i.test(visualPath);
+
+      command = ffmpeg();
+
+      if (isVideo) {
+        // For video assets: loop video and scale/pad to exact aspect ratio dimensions
+        command.input(visualPath).inputOptions(['-stream_loop', '-1']);
+        const videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+        command.videoFilter(videoFilter);
+      } else {
+        // For still images: loop image and apply aspect-ratio scaled Ken Burns motion filter
+        command.input(visualPath).loop(duration);
+
+        let zoomFilter = `zoompan=z='min(zoom+0.0015,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=${width}x${height}`;
+        if (cameraEffect === 'pan-right') {
+          zoomFilter = `zoompan=z='1.1':x='if(lte(on,1),(iw-iw/zoom),max(iw/zoom,x-1))':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=${width}x${height}`;
+        } else if (cameraEffect === 'pan-left') {
+          zoomFilter = `zoompan=z='1.1':x='x+1':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=${width}x${height}`;
+        } else if (cameraEffect === 'zoom-out') {
+          zoomFilter = `zoompan=z='if(lte(zoom,1.0),1.15,max(1.0,zoom-0.0015))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:fps=24:s=${width}x${height}`;
+        } else if (cameraEffect === 'static') {
+          zoomFilter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+        }
+        command.videoFilter(zoomFilter);
       }
 
       if (audioPath && fs.existsSync(audioPath)) {
@@ -256,11 +285,9 @@ export class FFmpegComposerService {
       }
 
       command
-        .videoFilter(zoomFilter)
         .outputOptions([
           '-c:v libx264',
           '-preset ultrafast',
-          '-tune stillimage',
           '-r 24',
           '-pix_fmt yuv420p',
           '-t', `${duration}`,

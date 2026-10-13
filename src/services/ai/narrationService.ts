@@ -117,10 +117,42 @@ export class NarrationService {
       }
     }
 
-    // 5. High quality procedural audio wave generator fallback
+    // 5. Try Google Translate TTS (Free, fast and reliable HTTP MP3 speech fallback)
+    try {
+      const audioBuffer = await this.generateGoogleTts(options.narrationText);
+      if (audioBuffer && audioBuffer.length > 0) {
+        const mp3Path = filePath.endsWith('.wav') ? filePath.replace(/\.wav$/, '.mp3') : filePath;
+        fs.writeFileSync(mp3Path, audioBuffer);
+        return await resolveFinalNarration(mp3Path, publicUrl.replace(/\.wav$/, '.mp3'));
+      }
+    } catch (err) {
+      console.warn('Google TTS fallback notice:', err);
+    }
+
+    // 6. High quality procedural audio wave generator fallback
     const fallbackPath = filePath.endsWith('.mp3') ? filePath.replace(/\.mp3$/, '.wav') : filePath;
     await this.generateProceduralWavAudio(fallbackPath, options.narrationText, options.voiceId, options.desiredDuration);
     return await resolveFinalNarration(fallbackPath, publicUrl.replace(/\.mp3$/, '.wav'));
+  }
+
+  private static async generateGoogleTts(text: string): Promise<Buffer | null> {
+    try {
+      const cleanText = text.replace(/["\n\r]/g, ' ').trim().slice(0, 180);
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const arrayBuffer = await res.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private static estimateAudioDuration(filePath: string, text: string, fallbackDuration?: number): number {

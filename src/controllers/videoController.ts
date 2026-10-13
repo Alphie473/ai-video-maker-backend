@@ -54,8 +54,8 @@ export class VideoController {
       // Return project ID immediately so client can poll or show progress screen
       res.status(201).json({ projectId: project.id, status: 'started' });
 
-      // Run generation pipeline asynchronously with target duration
-      VideoController.executeGenerationPipeline(project.id, prompt, style, aspectRatio, voiceId, musicTrack, targetDuration).catch((err: any) => {
+      // Run generation pipeline asynchronously with target duration and script text
+      VideoController.executeGenerationPipeline(project.id, prompt, scriptText, style, aspectRatio, voiceId, musicTrack, targetDuration).catch((err: any) => {
         console.error(`Pipeline error for project ${project.id}:`, err);
         activeGenerationProgress[project.id] = { percent: 0, step: `Failed: ${err.message || 'Pipeline execution error'}` };
         prisma.project.update({
@@ -75,22 +75,31 @@ export class VideoController {
   private static async executeGenerationPipeline(
     projectId: string,
     prompt: string,
+    scriptText: string | undefined,
     style: string,
     aspectRatio: string,
     voiceId: string,
     musicTrack: string,
     preferredDuration?: number
   ) {
-    // 1. Script Analysis with topic extraction and target duration
+    // 1. Script Analysis with topic extraction, visual style and target duration
     activeGenerationProgress[projectId] = { percent: 15, step: 'Analyzing script & creating story breakdown...' };
-    const scriptResult = await ScriptAnalyzerService.analyzeScript(prompt, style, preferredDuration);
+    const scriptResult = await ScriptAnalyzerService.analyzeScript(prompt, style, preferredDuration, scriptText);
+
+    // Strictly honor user explicit selections from frontend payload, falling back to LLM suggestions
+    const effectiveVoiceId = voiceId || scriptResult.suggestedVoiceId || 'adam-deep';
+    const effectiveMusicTrack = musicTrack || scriptResult.suggestedMusicTrack || 'ambient-epic';
+    const effectiveStyle = style || scriptResult.suggestedStyle || 'cinematic';
+    const effectiveAspectRatio = aspectRatio || '16:9';
 
     await prisma.project.update({
       where: { id: projectId },
       data: {
         title: scriptResult.title,
-        voiceId: scriptResult.suggestedVoiceId || voiceId,
-        musicTrack: scriptResult.suggestedMusicTrack || musicTrack
+        voiceId: effectiveVoiceId,
+        musicTrack: effectiveMusicTrack,
+        style: effectiveStyle,
+        aspectRatio: effectiveAspectRatio
       }
     });
 
@@ -107,21 +116,21 @@ export class VideoController {
         step: `Generating Scene ${rawScene.sceneNumber} visual artwork & TTS narration...`
       };
 
-      // Visual artwork strictly passing down project topic and image prompt
+      // Visual artwork strictly passing down project topic, action prompt, style and aspect ratio
       const visualUrl = await VisualGeneratorService.generateVisual({
         prompt: rawScene.prompt,
         imagePrompt: rawScene.imagePrompt,
-        style,
-        aspectRatio,
+        style: effectiveStyle,
+        aspectRatio: effectiveAspectRatio,
         sceneNumber: rawScene.sceneNumber,
         projectId,
-        topic: scriptResult.title || prompt
+        topic: prompt
       });
 
-      // Narration audio: generate audio and dynamically calculate actual duration
+      // Narration audio: generate audio with effective voice and dynamically calculate duration
       const narrationResult = await NarrationService.generateNarration({
         narrationText: rawScene.narrationText,
-        voiceId: scriptResult.suggestedVoiceId || voiceId,
+        voiceId: effectiveVoiceId,
         sceneNumber: rawScene.sceneNumber,
         projectId,
         desiredDuration: rawScene.duration
@@ -133,7 +142,10 @@ export class VideoController {
         sfxUrl = await MusicSfxService.getSfxUrl(rawScene.sfxTrack, narrationResult.duration);
       }
 
-      // Save Scene to DB with the dynamically calculated duration
+      // Check whether visual is a video or image
+      const isVideoAsset = /\.(mp4|webm|mov|mkv)$/i.test(visualUrl);
+
+      // Save Scene to DB with the dynamically calculated duration and visual type
       const sceneRecord = await prisma.scene.create({
         data: {
           projectId,
@@ -141,7 +153,7 @@ export class VideoController {
           prompt: rawScene.prompt,
           imagePrompt: rawScene.imagePrompt,
           visualUrl,
-          visualType: 'image',
+          visualType: isVideoAsset ? 'video' : 'image',
           narrationText: rawScene.narrationText,
           narrationUrl: narrationResult.audioUrl,
           duration: narrationResult.duration,
@@ -159,7 +171,7 @@ export class VideoController {
 
     // Total duration scaled dynamically based on sum of scene narration durations
     const totalDuration = sceneRecords.reduce((acc, s) => acc + s.duration, 0);
-    const musicUrl = await MusicSfxService.getMusicTrackUrl(scriptResult.suggestedMusicTrack || musicTrack, totalDuration);
+    const musicUrl = await MusicSfxService.getMusicTrackUrl(effectiveMusicTrack, totalDuration);
 
     const composeScenes: ComposeSceneInput[] = sceneRecords.map(s => ({
       sceneNumber: s.sceneNumber,
@@ -178,7 +190,7 @@ export class VideoController {
       musicPath: musicUrl,
       musicVolume: 0.25,
       captionStyle: 'modern-yellow',
-      aspectRatio
+      aspectRatio: effectiveAspectRatio
     }, (percent, stepName) => {
       activeGenerationProgress[projectId] = { percent, step: stepName };
     });

@@ -53,24 +53,28 @@ export class VisualGeneratorService {
       }
     }
 
-    // Try Pollinations.ai (Free AI image API)
+    // Try Pollinations.ai (Free AI image API) with extended timeout and dynamic seed
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s timeout for high-res AI generation
     try {
-      const encodedPrompt = encodeURIComponent(`${effectivePrompt}, ${options.style || 'cinematic'} lighting, ultra detailed 8k cinematic masterpiece`);
+      const encodedPrompt = encodeURIComponent(`${effectivePrompt}, ${options.style || 'cinematic'} style, highly detailed`);
       const width = options.aspectRatio === '9:16' ? 720 : options.aspectRatio === '1:1' ? 800 : 1280;
       const height = options.aspectRatio === '9:16' ? 1280 : options.aspectRatio === '1:1' ? 800 : 720;
-      const pollinationsUrl = `https://pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${options.sceneNumber + 42}&nologo=true`;
+      const seed = Math.floor(Math.abs(Math.sin(options.sceneNumber * 997 + Date.now()) * 100000));
+      const pollinationsUrl = `https://pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
 
       const res = await fetch(pollinationsUrl, { signal: controller.signal });
       if (res.ok) {
         const arrayBuffer = await res.arrayBuffer();
-        const pngPath = filePath.replace('.bmp', '.png');
-        fs.writeFileSync(pngPath, Buffer.from(arrayBuffer));
-        return publicUrl.replace('.bmp', '.png');
+        const contentType = res.headers.get('content-type') || '';
+        const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg');
+        const fileExt = isJpeg ? '.jpg' : '.png';
+        const targetPath = filePath.replace('.bmp', fileExt);
+        fs.writeFileSync(targetPath, Buffer.from(arrayBuffer));
+        return publicUrl.replace('.bmp', fileExt);
       }
     } catch (err) {
-      console.log('Pollinations API fetch timed out, creating procedural visual artwork');
+      console.log('Pollinations API fetch timed out or offline, creating procedural visual artwork');
     } finally {
       clearTimeout(timeoutId);
     }
@@ -115,7 +119,6 @@ export class VisualGeneratorService {
     const width = options.aspectRatio === '9:16' ? 720 : options.aspectRatio === '1:1' ? 800 : 1280;
     const height = options.aspectRatio === '9:16' ? 1280 : options.aspectRatio === '1:1' ? 800 : 720;
     const style = (options.style || 'cinematic').toLowerCase();
-    const seed = (options.sceneNumber * 137) % 360;
 
     // BMP Row padding to 4 bytes
     const rowSize = Math.floor((24 * width + 31) / 32) * 4;
@@ -143,13 +146,28 @@ export class VisualGeneratorService {
     buffer.writeUInt32LE(0, 46); // Colors in palette
     buffer.writeUInt32LE(0, 50); // Important colors
 
-    // Theme color palette selection tailored to actual scene topic & prompt
+    // Theme color palette selection tailored to actual scene topic, action & visual style
     const textContext = `${options.topic || ''} ${options.prompt} ${options.imagePrompt}`.toLowerCase();
     let rTop = 20, gTop = 15, bTop = 10;
     let rMid = 80, gMid = 55, bMid = 30;
     let rBot = 220, gBot = 165, bBot = 75; // Default warm golden cinematic atmosphere
 
-    if (textContext.match(/pyramid|egypt|desert|ancient|pharaoh|tomb|dune|sand/)) {
+    if (textContext.match(/sing|dance|dancing|singing|child|kid|joy|happy|celebrat/)) {
+      // Cheerful / Dance / Kids: radiant sunrise coral, gold & warm magenta
+      rTop = 38; gTop = 16; bTop = 42;
+      rMid = 185; gMid = 75; bMid = 95;
+      rBot = 255; gBot = 195; bBot = 90;
+    } else if (textContext.match(/walk|walking|talk|talking|speak|discuss|conversation|street/)) {
+      // Walk & Talk / Urban: elegant daylight slate, warm avenue amber
+      rTop = 20; gTop = 28; bTop = 42;
+      rMid = 70; gMid = 95; bMid = 120;
+      rBot = 235; gBot = 210; bBot = 175;
+    } else if (textContext.match(/cook|chef|food|kitchen|bake|pizza|pasta/)) {
+      // Culinary: warm terracotta, saffron gold & olive warmth
+      rTop = 38; gTop = 18; bTop = 12;
+      rMid = 160; gMid = 75; bMid = 35;
+      rBot = 245; gBot = 185; bBot = 65;
+    } else if (textContext.match(/pyramid|egypt|desert|ancient|pharaoh|tomb|dune|sand/)) {
       // Ancient Egypt: warm golden sands, terracotta & amber
       rTop = 28; gTop = 16; bTop = 8;
       rMid = 145; gMid = 85; bMid = 35;
@@ -175,9 +193,20 @@ export class VisualGeneratorService {
       rMid = 42; gMid = 14; bMid = 78;
       rBot = 6; gBot = 182; bBot = 212;
     } else if (style.includes('anime')) {
+      // Anime: vibrant twilight blue to vivid sunrise orange
       rTop = 13; gTop = 37; bTop = 63;
       rMid = 30; gMid = 95; bMid = 116;
       rBot = 243; gBot = 148; bBot = 34;
+    } else if (style.includes('documentary')) {
+      // Documentary: warm archival sepia and authentic charcoal
+      rTop = 24; gTop = 20; bTop = 18;
+      rMid = 85; gMid = 75; bMid = 62;
+      rBot = 215; gBot = 195; bBot = 165;
+    } else if (style.includes('3d')) {
+      // 3D Render: deep indigo with electric teal and magenta highlights
+      rTop = 14; gTop = 10; bTop = 38;
+      rMid = 28; gMid = 105; bMid = 165;
+      rBot = 240; gBot = 125; bBot = 195;
     }
 
     // Render gradient + sun glow pixel data into buffer
