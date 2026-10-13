@@ -9,6 +9,7 @@ export interface VisualGenerationOptions {
   sceneNumber: number;
   projectId: string;
   topic?: string;
+  duration?: number;
 }
 
 export class VisualGeneratorService {
@@ -29,6 +30,7 @@ export class VisualGeneratorService {
     const filePath = path.join(storageDir, filename);
     const publicUrl = `/media/visuals/${filename}`;
 
+    const geminiKey = process.env.GEMINI_API_KEY;
     const replicateKey = process.env.REPLICATE_API_KEY;
     const falKey = process.env.FAL_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -38,7 +40,22 @@ export class VisualGeneratorService {
       ? `${options.topic}, ${options.imagePrompt}`
       : options.imagePrompt;
 
-    // 1. Try Replicate Text-to-Video if key is configured
+    // 1. Try Google Veo (via configured GEMINI_API_KEY) for realistic moving video
+    if (geminiKey && geminiKey.trim() !== '') {
+      try {
+        const videoBuffer = await this.generateGoogleVeoVideo(effectivePrompt, geminiKey, options.aspectRatio, options.duration);
+        if (videoBuffer) {
+          const mp4Filename = `scene_${options.projectId}_${options.sceneNumber}_${Date.now()}.mp4`;
+          const mp4Path = path.join(storageDir, mp4Filename);
+          fs.writeFileSync(mp4Path, videoBuffer);
+          return `/media/visuals/${mp4Filename}`;
+        }
+      } catch (err: any) {
+        console.warn('Google Veo video generation notice:', err.message || err);
+      }
+    }
+
+    // 2. Try Replicate Text-to-Video if key is configured
     if (replicateKey && replicateKey.trim() !== '') {
       try {
         const videoUrl = await this.generateReplicateVideo(effectivePrompt, replicateKey, options.aspectRatio);
@@ -260,6 +277,85 @@ export class VisualGeneratorService {
       return null;
     } catch (err) {
       console.warn('Fal.ai video generation notice:', err);
+      return null;
+    }
+  }
+
+  private static async generateGoogleVeoVideo(
+    prompt: string,
+    apiKey: string,
+    aspectRatio?: string,
+    duration?: number
+  ): Promise<Buffer | null> {
+    try {
+      const ar = aspectRatio === '9:16' ? '9:16' : aspectRatio === '1:1' ? '1:1' : '16:9';
+      const dur = Math.min(8, Math.max(4, Math.round(duration || 5)));
+
+      const params: Record<string, any> = {
+        sampleCount: 1,
+        aspectRatio: ar
+      };
+      if (dur >= 4 && dur <= 8) {
+        params.durationSeconds = dur;
+      }
+
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning', {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          instances: [
+            {
+              prompt: prompt.slice(0, 480)
+            }
+          ],
+          parameters: params
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        console.warn(`Google Veo request returned status ${response.status}: ${errMsg}`);
+        return null;
+      }
+
+      const op = await response.json();
+      if (!op.name) return null;
+
+      // Poll long-running operation
+      const maxAttempts = 30; // 30 * 5s = 150s timeout
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const checkRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${op.name}?key=${apiKey}`);
+        if (!checkRes.ok) continue;
+
+        const checkData = await checkRes.json();
+        if (checkData.done) {
+          if (checkData.error) {
+            console.warn('Google Veo operation failed:', checkData.error.message);
+            return null;
+          }
+          const videoObj = checkData.response?.generatedVideos?.[0]?.video;
+          if (videoObj?.bytesBase64Encoded) {
+            return Buffer.from(videoObj.bytesBase64Encoded, 'base64');
+          }
+          if (videoObj?.uri) {
+            const dlRes = await fetch(videoObj.uri, {
+              headers: { 'x-goog-api-key': apiKey }
+            });
+            if (dlRes.ok) {
+              return Buffer.from(await dlRes.arrayBuffer());
+            }
+          }
+          return null;
+        }
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('Google Veo execution error:', err.message || err);
       return null;
     }
   }

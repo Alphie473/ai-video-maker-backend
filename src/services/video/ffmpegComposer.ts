@@ -284,19 +284,26 @@ export class FFmpegComposerService {
         command.input('anullsrc=r=44100:cl=mono').inputFormat('lavfi');
       }
 
+      const outputOptions = [
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-r', '24',
+        '-pix_fmt', 'yuv420p',
+        '-t', `${duration}`,
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-af', 'apad',
+        '-movflags', '+faststart',
+        '-y'
+      ];
+
+      if (isVideo) {
+        // Explicitly map video from input 0 (video asset) and audio from input 1 (narration speech)
+        outputOptions.unshift('-map', '0:v:0', '-map', '1:a:0');
+      }
+
       command
-        .outputOptions([
-          '-c:v libx264',
-          '-preset ultrafast',
-          '-r 24',
-          '-pix_fmt yuv420p',
-          '-t', `${duration}`,
-          '-c:a aac',
-          '-b:a 192k',
-          '-af', 'apad',
-          '-movflags +faststart',
-          '-y'
-        ])
+        .outputOptions(outputOptions)
         .output(outputPath)
         .on('end', () => {
           if (!isDone) {

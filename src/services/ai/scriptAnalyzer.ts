@@ -348,14 +348,14 @@ User prompt: "${userPrompt}"`;
       musicTrack = 'upbeat-synth';
       voiceId = 'rachel-soft';
       defaultSfx = 'whoosh';
-    } else if (isWalkOrTalk) {
-      musicTrack = 'lo-fi-chill';
-      voiceId = 'alex-narrator';
-      defaultSfx = 'footsteps';
     } else if (isCulinary) {
       musicTrack = 'lo-fi-chill';
       voiceId = 'rachel-soft';
       defaultSfx = 'whoosh';
+    } else if (isWalkOrTalk) {
+      musicTrack = 'lo-fi-chill';
+      voiceId = 'alex-narrator';
+      defaultSfx = 'footsteps';
     } else if (isSciFi) {
       musicTrack = 'sci-fi-synth';
       voiceId = 'synth-ai';
@@ -480,6 +480,41 @@ User prompt: "${userPrompt}"`;
           transition: 'fade'
         }
       ];
+    } else if (isCulinary) {
+      sceneTemplates = [
+        {
+          prompt: `Opening presentation of fresh culinary ingredients for ${mainTopic}`,
+          imagePrompt: `Artisanal wide shot showcasing fresh ingredients, rustic kitchen counter, natural morning daylight, ${styleModifiers}`,
+          narration: `Every extraordinary culinary creation begins with fresh ingredients and a passion for flavor in ${mainTopic}.`,
+          cameraEffect: 'pan-right',
+          sfx: defaultSfx,
+          transition: 'fade'
+        },
+        {
+          prompt: `Skillful culinary preparation and close-up craftsmanship in ${mainTopic}`,
+          imagePrompt: `Close-up shot of skilled chef hands slicing, seasoning, and preparing with precision, shallow depth of field, ${styleModifiers}`,
+          narration: `Care and precision guide every touch, blending textures and aromas into a symphony of taste.`,
+          cameraEffect: 'zoom-in',
+          sfx: 'whoosh',
+          transition: 'crossfade'
+        },
+        {
+          prompt: `Dynamic cooking action with steam and sizzling heat in ${mainTopic}`,
+          imagePrompt: `Dynamic cooking shot with rising steam, sizzling heat, vibrant colors in the pan, glowing kitchen lighting, ${styleModifiers}`,
+          narration: `Heat and timing come together in perfect harmony, transforming raw ingredients into culinary art.`,
+          cameraEffect: 'pan-left',
+          sfx: 'whoosh',
+          transition: 'dissolve'
+        },
+        {
+          prompt: `Magnificent plated dish presentation of ${mainTopic}`,
+          imagePrompt: `Masterpiece plate presentation of ${mainTopic}, mouthwatering garnishes, restaurant elegance, immaculate lighting, ${styleModifiers}`,
+          narration: `Plated to perfection, the finished creation stands ready—a delightful feast for the senses.`,
+          cameraEffect: 'zoom-out',
+          sfx: defaultSfx,
+          transition: 'slide'
+        }
+      ];
     } else if (isWalkOrTalk) {
       sceneTemplates = [
         {
@@ -529,41 +564,6 @@ User prompt: "${userPrompt}"`;
           cameraEffect: 'zoom-in',
           sfx: 'footsteps',
           transition: 'fade'
-        }
-      ];
-    } else if (isCulinary) {
-      sceneTemplates = [
-        {
-          prompt: `Opening presentation of fresh culinary ingredients for ${mainTopic}`,
-          imagePrompt: `Artisanal wide shot showcasing fresh ingredients, rustic kitchen counter, natural morning daylight, ${styleModifiers}`,
-          narration: `Every extraordinary culinary creation begins with fresh ingredients and a passion for flavor in ${mainTopic}.`,
-          cameraEffect: 'pan-right',
-          sfx: defaultSfx,
-          transition: 'fade'
-        },
-        {
-          prompt: `Skillful culinary preparation and close-up craftsmanship in ${mainTopic}`,
-          imagePrompt: `Close-up shot of skilled chef hands slicing, seasoning, and preparing with precision, shallow depth of field, ${styleModifiers}`,
-          narration: `Care and precision guide every touch, blending textures and aromas into a symphony of taste.`,
-          cameraEffect: 'zoom-in',
-          sfx: 'whoosh',
-          transition: 'crossfade'
-        },
-        {
-          prompt: `Dynamic cooking action with steam and sizzling heat in ${mainTopic}`,
-          imagePrompt: `Dynamic cooking shot with rising steam, sizzling heat, vibrant colors in the pan, glowing kitchen lighting, ${styleModifiers}`,
-          narration: `Heat and timing come together in perfect harmony, transforming raw ingredients into culinary art.`,
-          cameraEffect: 'pan-left',
-          sfx: 'whoosh',
-          transition: 'dissolve'
-        },
-        {
-          prompt: `Magnificent plated dish presentation of ${mainTopic}`,
-          imagePrompt: `Masterpiece plate presentation of ${mainTopic}, mouthwatering garnishes, restaurant elegance, immaculate lighting, ${styleModifiers}`,
-          narration: `Plated to perfection, the finished creation stands ready—a delightful feast for the senses.`,
-          cameraEffect: 'zoom-out',
-          sfx: defaultSfx,
-          transition: 'slide'
         }
       ];
     } else {

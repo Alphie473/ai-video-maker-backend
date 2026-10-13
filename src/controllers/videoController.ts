@@ -124,7 +124,8 @@ export class VideoController {
         aspectRatio: effectiveAspectRatio,
         sceneNumber: rawScene.sceneNumber,
         projectId,
-        topic: prompt
+        topic: prompt,
+        duration: rawScene.duration
       });
 
       // Narration audio: generate audio with effective voice and dynamically calculate duration
@@ -267,8 +268,11 @@ export class VideoController {
         aspectRatio: scene.project.aspectRatio,
         sceneNumber: scene.sceneNumber,
         projectId: scene.projectId,
-        topic
+        topic,
+        duration: scene.duration
       });
+
+      const isVideoAsset = /\.(mp4|webm|mov|mkv)$/i.test(visualUrl);
 
       const updatedScene = await prisma.scene.update({
         where: { id: sceneId },
@@ -276,6 +280,7 @@ export class VideoController {
           prompt: updatedPrompt,
           imagePrompt: updatedImagePrompt,
           visualUrl,
+          visualType: isVideoAsset ? 'video' : 'image',
           cameraEffect: cameraEffect || scene.cameraEffect
         }
       });
