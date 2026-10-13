@@ -21,7 +21,7 @@ export class VisualGeneratorService {
   }
 
   /**
-   * Generates visual image asset for a scene.
+   * Generates visual image or video asset for a scene.
    */
   static async generateVisual(options: VisualGenerationOptions): Promise<string> {
     const storageDir = this.getStorageDir();
@@ -29,6 +29,8 @@ export class VisualGeneratorService {
     const filePath = path.join(storageDir, filename);
     const publicUrl = `/media/visuals/${filename}`;
 
+    const replicateKey = process.env.REPLICATE_API_KEY;
+    const falKey = process.env.FAL_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
 
     // Ensure user topic is strictly included in the final image prompt
@@ -36,6 +38,45 @@ export class VisualGeneratorService {
       ? `${options.topic}, ${options.imagePrompt}`
       : options.imagePrompt;
 
+    // 1. Try Replicate Text-to-Video if key is configured
+    if (replicateKey && replicateKey.trim() !== '') {
+      try {
+        const videoUrl = await this.generateReplicateVideo(effectivePrompt, replicateKey, options.aspectRatio);
+        if (videoUrl) {
+          const res = await fetch(videoUrl);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const mp4Filename = `scene_${options.projectId}_${options.sceneNumber}_${Date.now()}.mp4`;
+            const mp4Path = path.join(storageDir, mp4Filename);
+            fs.writeFileSync(mp4Path, buffer);
+            return `/media/visuals/${mp4Filename}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Replicate video generation failed, falling back:', err);
+      }
+    }
+
+    // 2. Try Fal.ai Text-to-Video if key is configured
+    if (falKey && falKey.trim() !== '') {
+      try {
+        const videoUrl = await this.generateFalVideo(effectivePrompt, falKey, options.aspectRatio);
+        if (videoUrl) {
+          const res = await fetch(videoUrl);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const mp4Filename = `scene_${options.projectId}_${options.sceneNumber}_${Date.now()}.mp4`;
+            const mp4Path = path.join(storageDir, mp4Filename);
+            fs.writeFileSync(mp4Path, buffer);
+            return `/media/visuals/${mp4Filename}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Fal.ai video generation failed, falling back:', err);
+      }
+    }
+
+    // 3. Try DALL-E 3 image generation
     if (openaiKey && openaiKey.trim() !== '') {
       try {
         const url = await this.generateDallE(effectivePrompt, openaiKey);
@@ -105,6 +146,120 @@ export class VisualGeneratorService {
       return data.data?.[0]?.url || null;
     } catch (err) {
       console.warn('Error calling OpenAI DALL-E API:', err);
+      return null;
+    }
+  }
+
+  private static async generateReplicateVideo(
+    prompt: string,
+    apiKey: string,
+    aspectRatio?: string
+  ): Promise<string | null> {
+    try {
+      const response = await fetch('https://api.replicate.com/v1/models/minimax/video-01/predictions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          input: {
+            prompt: prompt.slice(0, 500),
+            prompt_optimizer: true
+          }
+        })
+      });
+
+      if (!response.ok) {
+        // Fallback to zeroscope if minimax endpoint is busy or needs model-level routing
+        const res2 = await fetch('https://api.replicate.com/v1/predictions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            version: '9f747673945c628663f397019a9794b2f0b0d16387ac47c751279daac479440b',
+            input: {
+              prompt: prompt.slice(0, 300),
+              num_frames: 24,
+              fps: 24
+            }
+          })
+        });
+        if (!res2.ok) return null;
+        const pred = await res2.json();
+        return await this.pollReplicatePrediction(pred.urls?.get || `https://api.replicate.com/v1/predictions/${pred.id}`, apiKey);
+      }
+
+      const prediction = await response.json();
+      return await this.pollReplicatePrediction(prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`, apiKey);
+    } catch (err) {
+      console.warn('Replicate video generation notice:', err);
+      return null;
+    }
+  }
+
+  private static async pollReplicatePrediction(getUrl: string, apiKey: string): Promise<string | null> {
+    const maxAttempts = 30;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const res = await fetch(getUrl, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.status === 'succeeded') {
+        const out = data.output;
+        return typeof out === 'string' ? out : Array.isArray(out) ? out[0] : null;
+      }
+      if (data.status === 'failed' || data.status === 'canceled') return null;
+    }
+    return null;
+  }
+
+  private static async generateFalVideo(
+    prompt: string,
+    apiKey: string,
+    aspectRatio?: string
+  ): Promise<string | null> {
+    try {
+      const res = await fetch('https://queue.fal.run/fal-ai/minimax/video-01/text-to-video', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: prompt.slice(0, 500)
+        })
+      });
+      if (!res.ok) return null;
+      const queue = await res.json();
+      if (!queue.status_url) return null;
+
+      const maxAttempts = 25;
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusRes = await fetch(queue.status_url, {
+          headers: { 'Authorization': `Key ${apiKey}` }
+        });
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json();
+        if (statusData.status === 'COMPLETED') {
+          const resultRes = await fetch(queue.response_url, {
+            headers: { 'Authorization': `Key ${apiKey}` }
+          });
+          if (resultRes.ok) {
+            const resultData = await resultRes.json();
+            return resultData.video?.url || null;
+          }
+        }
+        if (statusData.status === 'FAILED') return null;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Fal.ai video generation notice:', err);
       return null;
     }
   }

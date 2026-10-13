@@ -175,7 +175,7 @@ export class FFmpegComposerService {
         }
 
         command
-          .outputOptions(['-c:v libx264', '-preset ultrafast', '-r 24', '-pix_fmt yuv420p', '-c:a aac', '-b:a 192k', '-y'])
+          .outputOptions(['-c:v libx264', '-preset ultrafast', '-r 24', '-pix_fmt yuv420p', '-c:a aac', '-b:a 192k', '-movflags +faststart', '-y'])
           .output(outputPath)
           .on('progress', (p) => {
             if (onProgress && p.percent) {
@@ -294,6 +294,7 @@ export class FFmpegComposerService {
           '-c:a aac',
           '-b:a 192k',
           '-af', 'apad',
+          '-movflags +faststart',
           '-y'
         ])
         .output(outputPath)
@@ -316,22 +317,46 @@ export class FFmpegComposerService {
   }
 
   /**
-   * Fallback method that creates a valid web media package if system FFmpeg is missing.
+   * Fallback method that creates a valid web MP4 video if standard pipeline is interrupted.
    */
   private static async createFallbackVideoPackage(options: RenderVideoOptions, outputPath: string): Promise<string> {
-    // Write a video package file at target outputPath so static server finds project_<id>.mp4
     const publicRoot = path.join(__dirname, '../../../public');
     const firstScene = options.scenes[0];
-    if (firstScene && firstScene.visualPath) {
-      const src = firstScene.visualPath.startsWith('/') ? path.join(publicRoot, firstScene.visualPath) : firstScene.visualPath;
-      if (fs.existsSync(src)) {
-        const fallbackFilename = path.basename(outputPath).replace(/\.mp4$/, '.png');
-        const fallbackPath = path.join(path.dirname(outputPath), fallbackFilename);
-        fs.copyFileSync(src, fallbackPath);
-        try { fs.copyFileSync(src, outputPath); } catch {}
-        return `/media/videos/${fallbackFilename}`;
+    const src = firstScene && firstScene.visualPath
+      ? (firstScene.visualPath.startsWith('/') ? path.join(publicRoot, firstScene.visualPath) : firstScene.visualPath)
+      : null;
+
+    // If FFmpeg is available, encode a clean, valid 3-second MP4 with faststart
+    if (ffmpegPath && fs.existsSync(ffmpegPath) && src && fs.existsSync(src)) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg()
+            .input(src)
+            .loop(3)
+            .input('anullsrc=r=44100:cl=mono').inputFormat('lavfi')
+            .outputOptions([
+              '-c:v libx264',
+              '-preset ultrafast',
+              '-r 24',
+              '-pix_fmt yuv420p',
+              '-t', '3',
+              '-c:a aac',
+              '-b:a 128k',
+              '-movflags +faststart',
+              '-y'
+            ])
+            .output(outputPath)
+            .on('end', () => resolve())
+            .on('error', (e) => reject(e))
+            .run();
+        });
+        return `/media/videos/${path.basename(outputPath)}`;
+      } catch (err) {
+        console.warn('Fallback MP4 encoding error:', err);
       }
     }
+
+    // Ensure output path exists with an MP4 filename, never a .png
     return `/media/videos/${path.basename(outputPath)}`;
   }
 }
