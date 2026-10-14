@@ -71,5 +71,10 @@ model Settings {
   defaultResolution     String   @default("1080p") // 720p, 1080p, 4k
   defaultFps            Int      @default(30)
   enableAiMockFallback  Boolean  @default(true)
+  maxScenesPerRequest   Int      @default(3)
+  maxDurationPerScene   Int      @default(5)
+  maxCostPerRequest     Float    @default(1.50)
+  veoPricePerSecond     Float    @default(0.15)
+  strictVideoMode       Boolean  @default(true)
   updatedAt             DateTime @updatedAt
 }

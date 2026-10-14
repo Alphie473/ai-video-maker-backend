@@ -85,7 +85,9 @@ export class ScriptAnalyzerService {
     userPrompt: string,
     requestedStyle: string = 'cinematic',
     preferredDuration?: number,
-    scriptText?: string
+    scriptText?: string,
+    maxScenes: number = 3,
+    maxSceneDuration: number = 5
   ): Promise<ScriptAnalysisResult> {
     const geminiKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -98,7 +100,7 @@ export class ScriptAnalyzerService {
     // Check Gemini API key first (Free AI script breakdown engine)
     if (geminiKey && geminiKey.trim() !== '') {
       try {
-        rawResult = await this.analyzeWithGemini(userPrompt, mainTopic, requestedStyle, geminiKey, targetDuration, scriptText);
+        rawResult = await this.analyzeWithGemini(userPrompt, mainTopic, requestedStyle, geminiKey, targetDuration, scriptText, maxScenes, maxSceneDuration);
       } catch (err) {
         console.warn('Gemini Script Analyzer failed, trying secondary fallback:', err);
       }
@@ -106,7 +108,7 @@ export class ScriptAnalyzerService {
 
     if (!rawResult && openaiKey && openaiKey.trim() !== '') {
       try {
-        rawResult = await this.analyzeWithOpenAI(userPrompt, mainTopic, requestedStyle, openaiKey, targetDuration, scriptText);
+        rawResult = await this.analyzeWithOpenAI(userPrompt, mainTopic, requestedStyle, openaiKey, targetDuration, scriptText, maxScenes, maxSceneDuration);
       } catch (err) {
         console.warn('OpenAI Script Analyzer failed, trying secondary fallback:', err);
       }
@@ -114,11 +116,11 @@ export class ScriptAnalyzerService {
 
     // High quality intelligent template engine fallback
     if (!rawResult) {
-      rawResult = this.generateIntelligentBreakdown(userPrompt, requestedStyle, targetDuration, scriptText);
+      rawResult = this.generateIntelligentBreakdown(userPrompt, requestedStyle, targetDuration, scriptText, maxScenes, maxSceneDuration);
     }
 
-    // Post-process all scenes to strictly enforce main topic alignment & timeline consistency
-    return this.enforceTopicAndDurationAlignment(rawResult, mainTopic, targetDuration, requestedStyle);
+    // Post-process all scenes to strictly enforce main topic alignment, max scene limits & Veo timeline bounds
+    return this.enforceTopicAndDurationAlignment(rawResult, mainTopic, targetDuration, requestedStyle, maxScenes, maxSceneDuration);
   }
 
   private static async analyzeWithOpenAI(
@@ -127,11 +129,11 @@ export class ScriptAnalyzerService {
     style: string,
     apiKey: string,
     targetDuration?: number,
-    scriptText?: string
+    scriptText?: string,
+    maxScenes: number = 3,
+    maxSceneDuration: number = 5
   ): Promise<ScriptAnalysisResult> {
-    const durationNote = targetDuration
-      ? `The user requested an approximate total video duration of ${targetDuration} seconds. Divide this into scenes accordingly (between 4 and 8 scenes, with scene durations between 5 and 25 seconds).`
-      : `Provide between 4 and 6 scenes with natural scene durations (between 5 and 15 seconds each).`;
+    const durationNote = `Generate at most ${maxScenes} scenes. Scene durations must be between 4 and ${Math.min(8, maxSceneDuration)} seconds each.`;
 
     const scriptContext = scriptText && scriptText.trim()
       ? `\nUSER UPLOADED SCRIPT / NARRATION:\n${scriptText}\nUse this script text directly for the scene narrationText values.\n`
@@ -156,12 +158,12 @@ Return a JSON object with:
 - suggestedStyle: ${style}
 - suggestedMusicTrack: ambient-epic, sci-fi-synth, lo-fi-chill, dramatic-tension, or upbeat-synth
 - suggestedVoiceId: adam-deep, rachel-soft, alex-narrator, or synth-ai
-- scenes: array of scene objects:
+- scenes: array of scene objects (maximum ${maxScenes}):
   - sceneNumber (1, 2, 3...)
   - prompt: short visual scene summary featuring ${mainTopic}
   - imagePrompt: detailed prompt for AI image generator explicitly depicting ${mainTopic} (include cinematic lighting, shot type, color palette, style: ${styleModifiers})
   - narrationText: engaging narrative voiceover for this scene (~2.3 words per second matching duration)
-  - duration: estimated duration in seconds
+  - duration: estimated duration in seconds (between 4 and ${Math.min(8, maxSceneDuration)})
   - cameraEffect: pan-right, pan-left, zoom-in, zoom-out, or static
   - sfxTrack: rain, wind, city, footsteps, whoosh, explosions, or none
   - transition: fade, crossfade, dissolve, wipe, slide, or zoom`;
@@ -197,11 +199,11 @@ Return a JSON object with:
     style: string,
     apiKey: string,
     targetDuration?: number,
-    scriptText?: string
+    scriptText?: string,
+    maxScenes: number = 3,
+    maxSceneDuration: number = 5
   ): Promise<ScriptAnalysisResult> {
-    const durationNote = targetDuration
-      ? `The user requested an approximate total video length of ${targetDuration} seconds. Break the video into appropriate scenes to achieve this length.`
-      : `Provide between 4 and 6 scenes.`;
+    const durationNote = `Generate at most ${maxScenes} scenes. Scene durations must be between 4 and ${Math.min(8, maxSceneDuration)} seconds each.`;
 
     const scriptContext = scriptText && scriptText.trim()
       ? `\nUser's uploaded script:\n${scriptText}\nUse this script text directly for the scene narrationText values.\n`
@@ -232,7 +234,7 @@ Structure:
       "prompt": "Description specifically showcasing ${mainTopic}",
       "imagePrompt": "Detailed AI image prompt explicitly visualizing ${mainTopic} with ${styleModifiers}",
       "narrationText": "Engaging voiceover line matching the scene duration",
-      "duration": 6,
+      "duration": ${Math.min(8, maxSceneDuration)},
       "cameraEffect": "zoom-in",
       "sfxTrack": "wind",
       "transition": "fade"
@@ -265,13 +267,16 @@ User prompt: "${userPrompt}"`;
   }
 
   /**
-   * Post-processes scene breakdowns to ensure every visual prompt is strictly anchored to the user's topic and visual style.
+   * Post-processes scene breakdowns to ensure every visual prompt is strictly anchored to the user's topic and visual style,
+   * while enforcing maximum scene counts and duration bounds.
    */
-  private static enforceTopicAndDurationAlignment(
+  public static enforceTopicAndDurationAlignment(
     result: ScriptAnalysisResult,
     mainTopic: string,
     targetDuration: number | undefined,
-    style: string
+    style: string,
+    maxScenes: number = 3,
+    maxSceneDuration: number = 5
   ): ScriptAnalysisResult {
     const lowerTopic = mainTopic.toLowerCase();
     const styleModifiers = this.getStyleVisualModifiers(style);
@@ -279,6 +284,11 @@ User prompt: "${userPrompt}"`;
     // Ensure title reflects topic if placeholder or generic
     if (!result.title || result.title === 'Cinematic Journey' || result.title === 'Title' || result.title === 'Generating Video...') {
       result.title = mainTopic.charAt(0).toUpperCase() + mainTopic.slice(1);
+    }
+
+    // Hard ceiling on scene count to protect budget
+    if (result.scenes.length > maxScenes) {
+      result.scenes = result.scenes.slice(0, maxScenes);
     }
 
     result.scenes = result.scenes.map((scene, idx) => {
@@ -300,8 +310,9 @@ User prompt: "${userPrompt}"`;
         scenePrompt = `${scenePrompt} (${mainTopic})`;
       }
 
-      // Ensure duration is reasonable
-      const duration = typeof scene.duration === 'number' && scene.duration >= 3 ? scene.duration : 6.0;
+      // Strictly clamp duration between 4 and 8 (Veo 3.1 input bounds), capped by maxSceneDuration
+      const rawDur = typeof scene.duration === 'number' && scene.duration > 0 ? scene.duration : maxSceneDuration;
+      const duration = Math.max(4, Math.min(Math.min(maxSceneDuration, 8), Math.round(rawDur)));
 
       return {
         ...scene,
@@ -323,10 +334,12 @@ User prompt: "${userPrompt}"`;
     userPrompt: string,
     style: string = 'cinematic',
     preferredDuration?: number,
-    scriptText?: string
+    scriptText?: string,
+    maxScenes: number = 3,
+    maxSceneDuration: number = 5
   ): ScriptAnalysisResult {
     const mainTopic = this.extractMainTopic(userPrompt);
-    const targetDuration = preferredDuration || this.parseDurationFromPrompt(userPrompt) || 24;
+    const targetDuration = preferredDuration || this.parseDurationFromPrompt(userPrompt) || (maxScenes * maxSceneDuration);
     const uppercaseTitle = mainTopic.charAt(0).toUpperCase() + mainTopic.slice(1);
     const styleModifiers = this.getStyleVisualModifiers(style);
 
@@ -374,12 +387,12 @@ User prompt: "${userPrompt}"`;
       defaultSfx = 'whoosh';
     }
 
-    // Determine number of scenes
-    let sceneCount = 4;
-    if (targetDuration >= 120) sceneCount = 6;
-    else if (targetDuration >= 60) sceneCount = 5;
+    // Determine number of scenes (strictly capped by maxScenes)
+    let sceneCount = Math.max(1, Math.min(maxScenes, 3));
+    if (maxScenes > 3 && targetDuration >= 120) sceneCount = Math.min(maxScenes, 6);
+    else if (maxScenes > 3 && targetDuration >= 60) sceneCount = Math.min(maxScenes, 5);
 
-    const baseDuration = Math.round((targetDuration / sceneCount) * 10) / 10;
+    const baseDuration = Math.max(4, Math.min(Math.min(maxSceneDuration, 8), Math.round((targetDuration / sceneCount) * 10) / 10));
 
     // Check if user uploaded a script with paragraphs or sentences
     if (scriptText && scriptText.trim().length > 30) {

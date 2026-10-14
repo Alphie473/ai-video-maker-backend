@@ -10,9 +10,12 @@ export interface VisualGenerationOptions {
   projectId: string;
   topic?: string;
   duration?: number;
+  strictVideoMode?: boolean;
 }
 
 export class VisualGeneratorService {
+  public static lastGenerationError: string | null = null;
+
   private static getStorageDir(): string {
     const dir = path.join(__dirname, '../../../public/media/visuals');
     if (!fs.existsSync(dir)) {
@@ -35,6 +38,9 @@ export class VisualGeneratorService {
     const falKey = process.env.FAL_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
 
+    // Reset error state for current attempt
+    this.lastGenerationError = null;
+
     // Ensure user topic is strictly included in the final image prompt
     const effectivePrompt = options.topic && !options.imagePrompt.toLowerCase().includes(options.topic.toLowerCase())
       ? `${options.topic}, ${options.imagePrompt}`
@@ -51,6 +57,7 @@ export class VisualGeneratorService {
           return `/media/visuals/${mp4Filename}`;
         }
       } catch (err: any) {
+        this.lastGenerationError = err.message || String(err);
         console.warn('Google Veo video generation notice:', err.message || err);
       }
     }
@@ -74,7 +81,7 @@ export class VisualGeneratorService {
       }
     }
 
-    // 2. Try Fal.ai Text-to-Video if key is configured
+    // 3. Try Fal.ai Text-to-Video if key is configured
     if (falKey && falKey.trim() !== '') {
       try {
         const videoUrl = await this.generateFalVideo(effectivePrompt, falKey, options.aspectRatio);
@@ -93,7 +100,14 @@ export class VisualGeneratorService {
       }
     }
 
-    // 3. Try DALL-E 3 image generation
+    // Strict Video Mode Guardrail: If enabled, never silently substitute still images when video generation fails
+    const isStrictMode = options.strictVideoMode ?? true;
+    if (isStrictMode) {
+      const errDetails = this.lastGenerationError || 'No video generation provider succeeded (Google Veo quota exhausted or secondary keys unconfigured)';
+      throw new Error(`Real video generation failed for Scene ${options.sceneNumber}: ${errDetails}. Strict Video Mode is enabled to prevent silent slideshow fallback.`);
+    }
+
+    // 4. Try DALL-E 3 image generation (only if Strict Video Mode is explicitly disabled)
     if (openaiKey && openaiKey.trim() !== '') {
       try {
         const url = await this.generateDallE(effectivePrompt, openaiKey);
@@ -317,13 +331,20 @@ export class VisualGeneratorService {
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        let errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        if (response.status === 429) {
+          errMsg = `Veo quota exceeded (429 RESOURCE_EXHAUSTED). Video generation requires billing enabled on Google AI Studio / GCP project. Details: ${errMsg}`;
+        }
+        VisualGeneratorService.lastGenerationError = `Google Veo API error: ${errMsg}`;
         console.warn(`Google Veo request returned status ${response.status}: ${errMsg}`);
         return null;
       }
 
       const op = await response.json();
-      if (!op.name) return null;
+      if (!op.name) {
+        VisualGeneratorService.lastGenerationError = 'Google Veo response did not return an operation name.';
+        return null;
+      }
 
       // Poll long-running operation
       const maxAttempts = 30; // 30 * 5s = 150s timeout
@@ -335,6 +356,7 @@ export class VisualGeneratorService {
         const checkData = await checkRes.json();
         if (checkData.done) {
           if (checkData.error) {
+            VisualGeneratorService.lastGenerationError = `Google Veo operation error: ${checkData.error.message || 'Unknown error'}`;
             console.warn('Google Veo operation failed:', checkData.error.message);
             return null;
           }

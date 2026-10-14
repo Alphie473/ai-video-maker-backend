@@ -5,6 +5,7 @@ import { VisualGeneratorService } from '../services/ai/visualGenerator';
 import { NarrationService } from '../services/ai/narrationService';
 import { MusicSfxService } from '../services/ai/musicSfxService';
 import { FFmpegComposerService, ComposeSceneInput } from '../services/video/ffmpegComposer';
+import { SettingsController } from './settingsController';
 
 const prisma = new PrismaClient();
 
@@ -32,6 +33,22 @@ export class VideoController {
         return res.status(400).json({ error: 'Prompt or video description is required.' });
       }
 
+      // Pre-Flight Budget & Guardrail Verification (Backend enforcement before paid API calls)
+      const settings = await SettingsController.getResolvedSettings();
+      const maxScenes = settings.maxScenesPerRequest || 3;
+      const maxSceneDuration = settings.maxDurationPerScene || 5;
+      const pricePerSec = settings.veoPricePerSecond || 0.15;
+      const budgetCeiling = settings.maxCostPerRequest || 1.50;
+
+      const projectedSeconds = maxScenes * maxSceneDuration;
+      const projectedCost = Math.round(projectedSeconds * pricePerSec * 100) / 100;
+
+      if (projectedCost > budgetCeiling) {
+        return res.status(400).json({
+          error: `Budget Limit Exceeded: Estimated video generation cost ($${projectedCost.toFixed(2)}) exceeds your configured spending limit ($${budgetCeiling.toFixed(2)}). Please reduce scene count or scene duration in Settings, or adjust your spending limit. (*Note: Pricing is an estimate based on $${pricePerSec.toFixed(2)}/sec published rate and does not guarantee exact final provider billing).`
+        });
+      }
+
       const targetDuration = typeof preferredDuration === 'number' ? preferredDuration : typeof duration === 'number' ? duration : undefined;
 
       // Step 1: Create Initial Draft Project in DB
@@ -52,7 +69,12 @@ export class VideoController {
       activeGenerationProgress[project.id] = { percent: 10, step: 'Analyzing your idea & breaking into scenes...' };
 
       // Return project ID immediately so client can poll or show progress screen
-      res.status(201).json({ projectId: project.id, status: 'started' });
+      res.status(201).json({
+        projectId: project.id,
+        status: 'started',
+        estimatedCost: projectedCost,
+        budgetCeiling
+      });
 
       // Run generation pipeline asynchronously with target duration and script text
       VideoController.executeGenerationPipeline(project.id, prompt, scriptText, style, aspectRatio, voiceId, musicTrack, targetDuration).catch((err: any) => {
@@ -82,9 +104,32 @@ export class VideoController {
     musicTrack: string,
     preferredDuration?: number
   ) {
+    const settings = await SettingsController.getResolvedSettings();
+    const maxScenes = settings.maxScenesPerRequest || 3;
+    const maxSceneDuration = settings.maxDurationPerScene || 5;
+    const pricePerSec = settings.veoPricePerSecond || 0.15;
+    const budgetCeiling = settings.maxCostPerRequest || 1.50;
+    const strictVideoMode = settings.strictVideoMode ?? true;
+
     // 1. Script Analysis with topic extraction, visual style and target duration
     activeGenerationProgress[projectId] = { percent: 15, step: 'Analyzing script & creating story breakdown...' };
-    const scriptResult = await ScriptAnalyzerService.analyzeScript(prompt, style, preferredDuration, scriptText);
+    const scriptResult = await ScriptAnalyzerService.analyzeScript(
+      prompt,
+      style,
+      preferredDuration,
+      scriptText,
+      maxScenes,
+      maxSceneDuration
+    );
+
+    // Guardrail: Enforce exact post-breakdown cost ceiling before video rendering
+    const totalSceneSeconds = scriptResult.scenes.reduce((acc, s) => acc + s.duration, 0);
+    const estimatedCost = Math.round(totalSceneSeconds * pricePerSec * 100) / 100;
+    if (estimatedCost > budgetCeiling) {
+      throw new Error(
+        `Budget Limit Exceeded: Generated storyboard requires ${totalSceneSeconds}s of video (~$${estimatedCost.toFixed(2)}), which exceeds the configured limit of $${budgetCeiling.toFixed(2)}. Generation aborted before making paid video calls. (*Estimate based on $${pricePerSec.toFixed(2)}/s; does not guarantee provider final billing).`
+      );
+    }
 
     // Strictly honor user explicit selections from frontend payload, falling back to LLM suggestions
     const effectiveVoiceId = voiceId || scriptResult.suggestedVoiceId || 'adam-deep';
@@ -125,7 +170,8 @@ export class VideoController {
         sceneNumber: rawScene.sceneNumber,
         projectId,
         topic: prompt,
-        duration: rawScene.duration
+        duration: rawScene.duration,
+        strictVideoMode
       });
 
       // Narration audio: generate audio with effective voice and dynamically calculate duration
@@ -259,6 +305,18 @@ export class VideoController {
       const updatedPrompt = prompt || scene.prompt;
       const updatedImagePrompt = imagePrompt || scene.imagePrompt || updatedPrompt;
 
+      const settings = await SettingsController.getResolvedSettings();
+      const pricePerSec = settings.veoPricePerSecond || 0.15;
+      const budgetCeiling = settings.maxCostPerRequest || 1.50;
+      const strictVideoMode = settings.strictVideoMode ?? true;
+
+      const singleSceneCost = Math.round((scene.duration || 5) * pricePerSec * 100) / 100;
+      if (singleSceneCost > budgetCeiling) {
+        return res.status(400).json({
+          error: `Budget Limit Exceeded: Scene regeneration cost (~$${singleSceneCost.toFixed(2)}) exceeds your configured spending limit ($${budgetCeiling.toFixed(2)}). (*Estimate based on $${pricePerSec.toFixed(2)}/s; does not guarantee provider final billing).`
+        });
+      }
+
       // Re-generate visual strictly passing down the project topic
       const topic = scene.project.title || scene.project.originalPrompt;
       const visualUrl = await VisualGeneratorService.generateVisual({
@@ -269,7 +327,8 @@ export class VideoController {
         sceneNumber: scene.sceneNumber,
         projectId: scene.projectId,
         topic,
-        duration: scene.duration
+        duration: scene.duration,
+        strictVideoMode
       });
 
       const isVideoAsset = /\.(mp4|webm|mov|mkv)$/i.test(visualUrl);
